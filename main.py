@@ -1,12 +1,7 @@
 import os
-import random
-import io
+import asyncio
 from aiohttp import web
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -15,11 +10,20 @@ from telegram.ext import (
 )
 
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
+# ============================================================
+# الإعدادات
+# ============================================================
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+
+if not BOT_TOKEN:
+    raise RuntimeError(
+        "BOT_TOKEN غير موجود في Railway Variables"
+    )
 
 
 # ============================================================
-# 🎨 صفحة الأطفال
+# صفحة عالم الأطفال
 # ============================================================
 
 HTML = r"""
@@ -31,9 +35,9 @@ HTML = r"""
 <meta charset="UTF-8">
 
 <meta name="viewport"
-      content="width=device-width,initial-scale=1.0">
+content="width=device-width, initial-scale=1.0">
 
-<title>🎨 عالم الأطفال</title>
+<title>عالم الأطفال</title>
 
 <style>
 
@@ -44,7 +48,11 @@ HTML = r"""
 body {
     margin: 0;
     font-family: Arial, Tahoma, sans-serif;
-    background: linear-gradient(135deg,#fff4b8,#c9f5ff);
+    background: linear-gradient(
+        135deg,
+        #fff3b0,
+        #c8f7ff
+    );
     min-height: 100vh;
     color: #333;
 }
@@ -54,16 +62,12 @@ header {
     padding: 25px 10px;
 }
 
-header .logo {
-    font-size: 60px;
+.logo {
+    font-size: 65px;
 }
 
-header h1 {
-    margin: 5px;
+h1 {
     font-size: 32px;
-}
-
-header p {
     margin: 5px;
 }
 
@@ -75,11 +79,11 @@ header p {
 
 .top {
     background: white;
-    padding: 15px 20px;
     border-radius: 25px;
+    padding: 15px 20px;
+    margin-bottom: 20px;
     display: flex;
     justify-content: space-between;
-    margin-bottom: 20px;
     box-shadow: 0 5px 18px rgba(0,0,0,.12);
 }
 
@@ -91,7 +95,7 @@ header p {
 
 .menu {
     display: grid;
-    grid-template-columns: repeat(2,1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 15px;
 }
 
@@ -145,6 +149,7 @@ header p {
 .big {
     font-size: 100px;
     margin: 20px;
+    line-height: 1.5;
 }
 
 button {
@@ -182,9 +187,10 @@ button {
     height: 450px;
     border: 4px solid #ddd;
     border-radius: 20px;
-    touch-action: none;
     display: block;
     margin: auto;
+    background: white;
+    touch-action: none;
 }
 
 .colors {
@@ -201,6 +207,7 @@ button {
     border-radius: 50%;
     border: 3px solid white;
     box-shadow: 0 2px 7px rgba(0,0,0,.25);
+    cursor: pointer;
 }
 
 .letter,
@@ -222,7 +229,7 @@ button {
     max-width: 500px;
     margin: 20px auto;
     display: grid;
-    grid-template-columns: repeat(3,1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 5px;
 }
 
@@ -235,12 +242,13 @@ button {
     align-items: center;
     font-size: 45px;
     cursor: grab;
+    user-select: none;
 }
 
-@media(max-width:600px) {
+@media (max-width: 600px) {
 
     .menu {
-        grid-template-columns: repeat(2,1fr);
+        grid-template-columns: repeat(2, 1fr);
     }
 
     .card {
@@ -255,6 +263,7 @@ button {
     #canvas {
         height: 350px;
     }
+
 }
 
 </style>
@@ -277,7 +286,9 @@ button {
 
 <div class="top">
 
-<div>👋 مرحباً يا بطل!</div>
+<div>
+👋 مرحباً يا بطل!
+</div>
 
 <div class="stars">
 ⭐ <span id="stars">0</span>
@@ -350,17 +361,29 @@ button {
 
 <script>
 
-let stars =
-Number(localStorage.getItem("kids_stars") || 0);
+let stars = Number(
+    localStorage.getItem("kids_stars") || 0
+);
 
 function updateStars() {
-    document.getElementById("stars").textContent = stars;
+
+    document.getElementById(
+        "stars"
+    ).textContent = stars;
+
 }
 
-function addStars(n) {
-    stars += n;
-    localStorage.setItem("kids_stars",stars);
+function addStars(amount) {
+
+    stars += amount;
+
+    localStorage.setItem(
+        "kids_stars",
+        stars
+    );
+
     updateStars();
+
 }
 
 updateStars();
@@ -368,31 +391,40 @@ updateStars();
 
 function home() {
 
-    document.getElementById("home").style.display = "block";
+    document.getElementById(
+        "home"
+    ).style.display = "block";
 
-    document.getElementById("page")
-        .classList.remove("active");
+    document.getElementById(
+        "page"
+    ).classList.remove("active");
+
 }
 
 
 function show(html) {
 
-    document.getElementById("home").style.display = "none";
+    document.getElementById(
+        "home"
+    ).style.display = "none";
 
-    document.getElementById("page")
-        .classList.add("active");
+    document.getElementById(
+        "page"
+    ).classList.add("active");
 
-    document.getElementById("content")
-        .innerHTML = html;
+    document.getElementById(
+        "content"
+    ).innerHTML = html;
+
 }
 
 
 // ============================================================
-// 🖍️ الرسم
+// الرسم والتلوين
 // ============================================================
 
-let canvas;
-let ctx;
+let canvas = null;
+let ctx = null;
 let drawingNow = false;
 let currentColor = "#ff0000";
 let brush = 15;
@@ -400,288 +432,372 @@ let brush = 15;
 
 function drawing() {
 
-show(`
+    show(`
 
-<div class="title">
-🖍️ الرسم والتلوين
-</div>
+    <div class="title">
+        🖍️ الرسم والتلوين
+    </div>
 
-<canvas
-id="canvas"
-width="900"
-height="600">
-</canvas>
+    <canvas
+        id="canvas"
+        width="900"
+        height="600">
+    </canvas>
 
-<div class="colors">
+    <div class="colors">
 
-<div class="color"
-style="background:red"
-onclick="color('#ff0000')"></div>
+        <div
+            class="color"
+            style="background:#ff0000"
+            onclick="color('#ff0000')">
+        </div>
 
-<div class="color"
-style="background:orange"
-onclick="color('#ff9800')"></div>
+        <div
+            class="color"
+            style="background:#ff9800"
+            onclick="color('#ff9800')">
+        </div>
 
-<div class="color"
-style="background:yellow"
-onclick="color('#ffeb3b')"></div>
+        <div
+            class="color"
+            style="background:#ffeb3b"
+            onclick="color('#ffeb3b')">
+        </div>
 
-<div class="color"
-style="background:green"
-onclick="color('#4caf50')"></div>
+        <div
+            class="color"
+            style="background:#4caf50"
+            onclick="color('#4caf50')">
+        </div>
 
-<div class="color"
-style="background:blue"
-onclick="color('#2196f3')"></div>
+        <div
+            class="color"
+            style="background:#2196f3"
+            onclick="color('#2196f3')">
+        </div>
 
-<div class="color"
-style="background:purple"
-onclick="color('#9c27b0')"></div>
+        <div
+            class="color"
+            style="background:#9c27b0"
+            onclick="color('#9c27b0')">
+        </div>
 
-<div class="color"
-style="background:pink"
-onclick="color('#e91e63')"></div>
+        <div
+            class="color"
+            style="background:#e91e63"
+            onclick="color('#e91e63')">
+        </div>
 
-<div class="color"
-style="background:black"
-onclick="color('#000000')"></div>
+        <div
+            class="color"
+            style="background:#000000"
+            onclick="color('#000000')">
+        </div>
 
-</div>
+    </div>
 
-<div class="center">
+    <div class="center">
 
-<button onclick="brushSize(5)">
-🖊️ صغير
-</button>
+        <button onclick="brushSize(5)">
+            🖊️ صغير
+        </button>
 
-<button onclick="brushSize(15)">
-🖌️ متوسط
-</button>
+        <button onclick="brushSize(15)">
+            🖌️ متوسط
+        </button>
 
-<button onclick="brushSize(30)">
-🖍️ كبير
-</button>
+        <button onclick="brushSize(30)">
+            🖍️ كبير
+        </button>
 
-<button onclick="clearCanvas()">
-🗑️ مسح
-</button>
+        <button onclick="clearCanvas()">
+            🗑️ مسح
+        </button>
 
-<button class="blue"
-onclick="save()">
-💾 حفظ
-</button>
+        <button class="blue" onclick="saveDrawing()">
+            💾 حفظ
+        </button>
 
-<button class="green"
-onclick="finish()">
-⭐ انتهيت
-</button>
+        <button class="green" onclick="finishDrawing()">
+            ⭐ انتهيت
+        </button>
 
-</div>
+    </div>
 
-`);
+    `);
 
-canvas = document.getElementById("canvas");
-ctx = canvas.getContext("2d");
+    canvas = document.getElementById("canvas");
 
-ctx.fillStyle = "white";
-ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx = canvas.getContext("2d");
 
-canvas.addEventListener("pointerdown",start);
-canvas.addEventListener("pointermove",drawLine);
-canvas.addEventListener("pointerup",stop);
-canvas.addEventListener("pointercancel",stop);
+    ctx.fillStyle = "#ffffff";
+
+    ctx.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    canvas.addEventListener(
+        "pointerdown",
+        startDrawing
+    );
+
+    canvas.addEventListener(
+        "pointermove",
+        drawLine
+    );
+
+    canvas.addEventListener(
+        "pointerup",
+        stopDrawing
+    );
+
+    canvas.addEventListener(
+        "pointercancel",
+        stopDrawing
+    );
+
 }
 
 
-function pos(e) {
+function getPosition(event) {
 
-const r = canvas.getBoundingClientRect();
+    const rect =
+        canvas.getBoundingClientRect();
 
-return {
-x:(e.clientX-r.left)*canvas.width/r.width,
-y:(e.clientY-r.top)*canvas.height/r.height
-};
+    return {
+
+        x:
+            (event.clientX - rect.left)
+            * canvas.width
+            / rect.width,
+
+        y:
+            (event.clientY - rect.top)
+            * canvas.height
+            / rect.height
+
+    };
 
 }
 
 
-function start(e) {
+function startDrawing(event) {
 
-drawingNow = true;
+    drawingNow = true;
 
-const p = pos(e);
+    const position =
+        getPosition(event);
 
-ctx.beginPath();
+    ctx.beginPath();
 
-ctx.moveTo(p.x,p.y);
+    ctx.moveTo(
+        position.x,
+        position.y
+    );
+
 }
 
 
-function drawLine(e) {
+function drawLine(event) {
 
-if(!drawingNow) return;
+    if (!drawingNow) {
+        return;
+    }
 
-const p = pos(e);
+    const position =
+        getPosition(event);
 
-ctx.lineWidth = brush;
-ctx.lineCap = "round";
-ctx.strokeStyle = currentColor;
+    ctx.lineWidth = brush;
 
-ctx.lineTo(p.x,p.y);
-ctx.stroke();
+    ctx.lineCap = "round";
 
-ctx.beginPath();
-ctx.moveTo(p.x,p.y);
+    ctx.strokeStyle =
+        currentColor;
+
+    ctx.lineTo(
+        position.x,
+        position.y
+    );
+
+    ctx.stroke();
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+        position.x,
+        position.y
+    );
+
 }
 
 
-function stop() {
-drawingNow = false;
+function stopDrawing() {
+
+    drawingNow = false;
+
 }
 
 
-function color(c) {
-currentColor = c;
+function color(value) {
+
+    currentColor = value;
+
 }
 
 
-function brushSize(n) {
-brush = n;
+function brushSize(value) {
+
+    brush = value;
+
 }
 
 
 function clearCanvas() {
 
-ctx.fillStyle = "white";
+    ctx.fillStyle = "#ffffff";
 
-ctx.fillRect(
-0,
-0,
-canvas.width,
-canvas.height
-);
-
-}
-
-
-function save() {
-
-const a = document.createElement("a");
-
-a.download = "kids-drawing.png";
-
-a.href = canvas.toDataURL("image/png");
-
-a.click();
+    ctx.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
 
 }
 
 
-function finish() {
+function saveDrawing() {
 
-addStars(5);
+    const link =
+        document.createElement("a");
 
-alert("🎉 أحسنت!\n⭐ حصلت على 5 نجوم");
+    link.download =
+        "kids-drawing.png";
+
+    link.href =
+        canvas.toDataURL(
+            "image/png"
+        );
+
+    link.click();
+
+}
+
+
+function finishDrawing() {
+
+    addStars(5);
+
+    alert(
+        "🎉 أحسنت!\n⭐ حصلت على 5 نجوم"
+    );
 
 }
 
 
 // ============================================================
-// 🌳 🐶 🧰
- // ============================================================
+// الطبيعة والحيوانات والأدوات
+// ============================================================
 
 function category(type) {
 
-let title;
-let emojis;
+    let title = "";
+    let emojis = "";
 
-if(type === "nature") {
+    if (type === "nature") {
 
-title = "🌳 الطبيعة";
+        title = "🌳 الطبيعة";
 
-emojis = "🌳 🌸 🌺 ☀️ 🌈 ☁️";
+        emojis =
+            "🌳 🌸 🌺 ☀️ 🌈 ☁️ 🌱";
 
-}
+    }
 
-if(type === "animals") {
+    if (type === "animals") {
 
-title = "🐶 الحيوانات";
+        title = "🐶 الحيوانات";
 
-emojis = "🐶 🐱 🦁 🐘 🐰 🐼 🦋";
+        emojis =
+            "🐶 🐱 🦁 🐘 🐰 🐼 🦋";
 
-}
+    }
 
-if(type === "objects") {
+    if (type === "objects") {
 
-title = "🧰 الأدوات والأشياء";
+        title =
+            "🧰 الأدوات والأشياء";
 
-emojis = "🚗 ✈️ 🏠 🎒 ✏️ ⚽ 🧸";
+        emojis =
+            "🚗 ✈️ 🏠 🎒 ✏️ ⚽ 🧸";
 
-}
+    }
 
+    show(`
 
-show(`
+        <div class="center">
 
-<div class="center">
+            <div class="title">
+                ${title}
+            </div>
 
-<div class="title">
-${title}
-</div>
+            <div class="big">
+                ${emojis}
+            </div>
 
-<div class="big">
-${emojis}
-</div>
+            <p>
+                اختر النشاط الذي تريد.
+            </p>
 
-<p>
-اختر الرسم وابدأ التلوين 🎨
-</p>
+            <button
+                class="green"
+                onclick="drawing()">
+                🖍️ ابدأ الرسم والتلوين
+            </button>
 
-<button class="green"
-onclick="drawing()">
-🖍️ ابدأ التلوين
-</button>
+        </div>
 
-</div>
-
-`);
+    `);
 
 }
 
 
 // ============================================================
-// 🔤 الحروف
+// الحروف
 // ============================================================
 
 const lettersData = [
 
-["أ","أسد 🦁"],
-["ب","بطة 🦆"],
-["ت","تفاحة 🍎"],
-["ث","ثعلب 🦊"],
-["ج","جمل 🐪"],
-["ح","حصان 🐴"],
-["خ","خروف 🐑"],
-["د","دجاجة 🐔"],
-["ذ","ذئب 🐺"],
-["ر","رمان 🍎"],
-["ز","زرافة 🦒"],
-["س","سمكة 🐟"],
-["ش","شجرة 🌳"],
-["ص","صقر 🦅"],
-["ض","ضفدع 🐸"],
-["ط","طائرة ✈️"],
-["ظ","ظرف ✉️"],
-["ع","عصفور 🐦"],
-["غ","غزال 🦌"],
-["ف","فيل 🐘"],
-["ق","قمر 🌙"],
-["ك","كتاب 📖"],
-["ل","ليمون 🍋"],
-["م","موز 🍌"],
-["ن","نحلة 🐝"],
-["هـ","هلال 🌙"],
-["و","وردة 🌹"],
-["ي","يد ✋"]
+    ["أ", "أسد 🦁"],
+    ["ب", "بطة 🦆"],
+    ["ت", "تفاحة 🍎"],
+    ["ث", "ثعلب 🦊"],
+    ["ج", "جمل 🐪"],
+    ["ح", "حصان 🐴"],
+    ["خ", "خروف 🐑"],
+    ["د", "دجاجة 🐔"],
+    ["ذ", "ذئب 🐺"],
+    ["ر", "رمان 🍎"],
+    ["ز", "زرافة 🦒"],
+    ["س", "سمكة 🐟"],
+    ["ش", "شجرة 🌳"],
+    ["ص", "صقر 🦅"],
+    ["ض", "ضفدع 🐸"],
+    ["ط", "طائرة ✈️"],
+    ["ظ", "ظرف ✉️"],
+    ["ع", "عصفور 🐦"],
+    ["غ", "غزال 🦌"],
+    ["ف", "فيل 🐘"],
+    ["ق", "قمر 🌙"],
+    ["ك", "كتاب 📖"],
+    ["ل", "ليمون 🍋"],
+    ["م", "موز 🍌"],
+    ["ن", "نحلة 🐝"],
+    ["هـ", "هلال 🌙"],
+    ["و", "وردة 🌹"],
+    ["ي", "يد ✋"]
 
 ];
 
@@ -690,85 +806,102 @@ let letterIndex = 0;
 
 function letters() {
 
-letterIndex = 0;
+    letterIndex = 0;
 
-showLetter();
+    showLetter();
 
 }
 
 
 function showLetter() {
 
-const x = lettersData[letterIndex];
+    const item =
+        lettersData[letterIndex];
 
-show(`
+    show(`
 
-<div class="center">
+        <div class="center">
 
-<div class="title">
-🔤 الحروف العربية
-</div>
+            <div class="title">
+                🔤 الحروف العربية
+            </div>
 
-<div class="letter">
-${x[0]}
-</div>
+            <div class="letter">
+                ${item[0]}
+            </div>
 
-<h2>
-${x[1]}
-</h2>
+            <h2>
+                ${item[1]}
+            </h2>
 
-<button class="blue"
-onclick="nextLetter()">
-➡️ التالي
-</button>
+            <button
+                class="blue"
+                onclick="nextLetter()">
+                ➡️ الحرف التالي
+            </button>
 
-<button class="green"
-onclick="addStars(5)">
-⭐ تعلمت الحرف
-</button>
+            <button
+                class="green"
+                onclick="learnedLetter()">
+                ⭐ تعلمت الحرف
+            </button>
 
-</div>
+        </div>
 
-`);
+    `);
+
+}
+
+
+function learnedLetter() {
+
+    addStars(5);
 
 }
 
 
 function nextLetter() {
 
-letterIndex++;
+    letterIndex++;
 
-if(letterIndex >= lettersData.length) {
+    if (
+        letterIndex >=
+        lettersData.length
+    ) {
 
-letterIndex = 0;
+        letterIndex = 0;
 
-addStars(20);
+        addStars(20);
 
-alert("🎉 أكملت الحروف!");
+        alert(
+            "🎉 أكملت الحروف!"
+        );
 
-}
+    }
 
-showLetter();
+    showLetter();
 
 }
 
 
 // ============================================================
-// 🔢 الأرقام
+// الأرقام
 // ============================================================
 
 const numbersData = [
-["٠","صفر"],
-["١","واحد"],
-["٢","اثنان"],
-["٣","ثلاثة"],
-["٤","أربعة"],
-["٥","خمسة"],
-["٦","ستة"],
-["٧","سبعة"],
-["٨","ثمانية"],
-["٩","تسعة"],
-["١٠","عشرة"]
+
+    ["٠", "صفر"],
+    ["١", "واحد"],
+    ["٢", "اثنان"],
+    ["٣", "ثلاثة"],
+    ["٤", "أربعة"],
+    ["٥", "خمسة"],
+    ["٦", "ستة"],
+    ["٧", "سبعة"],
+    ["٨", "ثمانية"],
+    ["٩", "تسعة"],
+    ["١٠", "عشرة"]
+
 ];
 
 let numberIndex = 0;
@@ -776,507 +909,445 @@ let numberIndex = 0;
 
 function numbers() {
 
-numberIndex = 0;
+    numberIndex = 0;
 
-showNumber();
+    showNumber();
 
 }
 
 
 function showNumber() {
 
-const x = numbersData[numberIndex];
+    const item =
+        numbersData[numberIndex];
 
-show(`
+    show(`
 
-<div class="center">
+        <div class="center">
 
-<div class="title">
-🔢 الأرقام
-</div>
+            <div class="title">
+                🔢 الأرقام
+            </div>
 
-<div class="number">
-${x[0]}
-</div>
+            <div class="number">
+                ${item[0]}
+            </div>
 
-<h2>
-${x[1]}
-</h2>
+            <h2>
+                ${item[1]}
+            </h2>
 
-<button class="blue"
-onclick="nextNumber()">
-➡️ التالي
-</button>
+            <button
+                class="blue"
+                onclick="nextNumber()">
+                ➡️ الرقم التالي
+            </button>
 
-<button class="green"
-onclick="addStars(5)">
-⭐ تعلمت الرقم
-</button>
+            <button
+                class="green"
+                onclick="learnedNumber()">
+                ⭐ تعلمت الرقم
+            </button>
 
-</div>
+        </div>
 
-`);
+    `);
+
+}
+
+
+function learnedNumber() {
+
+    addStars(5);
 
 }
 
 
 function nextNumber() {
 
-numberIndex++;
+    numberIndex++;
 
-if(numberIndex >= numbersData.length) {
+    if (
+        numberIndex >=
+        numbersData.length
+    ) {
 
-numberIndex = 0;
+        numberIndex = 0;
 
-addStars(20);
+        addStars(20);
 
-alert("🎉 أكملت الأرقام!");
+        alert(
+            "🎉 أكملت الأرقام!"
+        );
 
-}
+    }
 
-showNumber();
+    showNumber();
 
 }
 
 
 // ============================================================
-// 🧩 أكمل الصورة
+// أكمل الصورة
 // ============================================================
 
 function missing() {
 
-show(`
+    show(`
 
-<div class="center">
+        <div class="center">
 
-<div class="title">
-🧩 أكمل الصورة
-</div>
+            <div class="title">
+                🧩 أكمل الصورة
+            </div>
 
-<div class="big">
-🐱
-</div>
+            <div class="big">
+                🐱
+            </div>
 
-<h2>
-ما الجزء الناقص؟
-</h2>
+            <h2>
+                اختر الحيوان الصحيح:
+            </h2>
 
-<button
-style="font-size:40px"
-onclick="correctMissing()">
-🐈
-</button>
+            <button
+                style="font-size:45px"
+                onclick="correctMissing()">
+                🐈
+            </button>
 
-<button
-style="font-size:40px"
-onclick="wrongMissing()">
-👂
-</button>
+            <button
+                style="font-size:45px"
+                onclick="wrongMissing()">
+                🐘
+            </button>
 
-<button
-style="font-size:40px"
-onclick="wrongMissing()">
-👁️
-</button>
+            <button
+                style="font-size:45px"
+                onclick="wrongMissing()">
+                🦁
+            </button>
 
-</div>
+        </div>
 
-`);
+    `);
 
 }
 
 
 function correctMissing() {
 
-addStars(10);
+    addStars(10);
 
-alert("🎉 إجابة صحيحة!\n⭐ +10");
+    alert(
+        "🎉 إجابة صحيحة!\n⭐ +10"
+    );
 
 }
 
 
 function wrongMissing() {
 
-alert("😊 حاول مرة أخرى");
+    alert(
+        "😊 حاول مرة أخرى"
+    );
 
 }
 
 
 // ============================================================
-// 🔀 إعادة تركيب الصورة
+// إعادة تركيب الصورة
 // ============================================================
 
 const puzzleItems = [
-"🌳","🍎","🐦",
-"☀️","🌸","🦋",
-"🌱","☁️","🏠"
+
+    "🌳",
+    "🍎",
+    "🐦",
+    "☀️",
+    "🌸",
+    "🦋",
+    "🌱",
+    "☁️",
+    "🏠"
+
 ];
 
 
 function puzzle() {
 
-show(`
+    show(`
 
-<div class="center">
+        <div class="center">
 
-<div class="title">
-🔀 إعادة تركيب الصورة
-</div>
+            <div class="title">
+                🔀 إعادة تركيب الصورة
+            </div>
 
-<p>
-رتب القطع ثم اضغط تحقق.
-</p>
+            <p>
+                رتب القطع ثم اضغط تحقق.
+            </p>
 
-</div>
+        </div>
 
-<div id="puzzle"
-class="puzzle">
-</div>
+        <div
+            id="puzzle"
+            class="puzzle">
+        </div>
 
-<div class="center">
+        <div class="center">
 
-<button class="orange"
-onclick="shuffle()">
-🔀 خلط
-</button>
+            <button
+                class="orange"
+                onclick="shufflePuzzle()">
+                🔀 خلط
+            </button>
 
-<button class="green"
-onclick="checkPuzzle()">
-⭐ تحقق
-</button>
+            <button
+                class="green"
+                onclick="checkPuzzle()">
+                ⭐ تحقق
+            </button>
 
-</div>
+        </div>
 
-`);
+    `);
 
-createPuzzle();
+    createPuzzle();
 
 }
 
 
 function createPuzzle() {
 
-const box =
-document.getElementById("puzzle");
+    const box =
+        document.getElementById(
+            "puzzle"
+        );
 
-box.innerHTML = "";
+    box.innerHTML = "";
 
-puzzleItems.forEach((x,i)=>{
+    puzzleItems.forEach(
+        function(item, index) {
 
-const p =
-document.createElement("div");
+            const piece =
+                document.createElement(
+                    "div"
+                );
 
-p.className = "piece";
+            piece.className =
+                "piece";
 
-p.textContent = x;
+            piece.textContent =
+                item;
 
-p.dataset.correct = i;
+            piece.dataset.correct =
+                index;
 
-p.draggable = true;
+            piece.draggable = true;
 
-box.appendChild(p);
+            box.appendChild(piece);
 
-});
+        }
+    );
 
-dragPuzzle();
-
-}
-
-
-function shuffle() {
-
-const box =
-document.getElementById("puzzle");
-
-const pieces =
-Array.from(box.children);
-
-pieces.sort(
-()=>Math.random()-.5
-);
-
-pieces.forEach(
-p=>box.appendChild(p)
-);
+    enablePuzzleDrag();
 
 }
 
 
-function dragPuzzle() {
+function shufflePuzzle() {
 
-const box =
-document.getElementById("puzzle");
+    const box =
+        document.getElementById(
+            "puzzle"
+        );
 
-let dragged = null;
+    const pieces =
+        Array.from(
+            box.children
+        );
 
+    pieces.sort(
+        function() {
+            return Math.random() - 0.5;
+        }
+    );
 
-box.addEventListener(
-"dragstart",
-e=>{
-dragged=e.target;
-}
-);
-
-
-box.addEventListener(
-"dragover",
-e=>{
-e.preventDefault();
-}
-);
-
-
-box.addEventListener(
-"drop",
-e=>{
-
-e.preventDefault();
-
-const target=e.target;
-
-if(
-target.classList.contains("piece")
-&&
-dragged
-&&
-target!==dragged
-){
-
-const all =
-Array.from(box.children);
-
-const a =
-all.indexOf(dragged);
-
-const b =
-all.indexOf(target);
-
-if(a<b){
-
-box.insertBefore(
-dragged,
-target.nextSibling
-);
-
-}else{
-
-box.insertBefore(
-dragged,
-target
-);
+    pieces.forEach(
+        function(piece) {
+            box.appendChild(piece);
+        }
+    );
 
 }
 
-}
 
-}
-);
+function enablePuzzleDrag() {
+
+    const box =
+        document.getElementById(
+            "puzzle"
+        );
+
+    let dragged = null;
+
+    box.addEventListener(
+        "dragstart",
+        function(event) {
+
+            dragged =
+                event.target;
+
+        }
+    );
+
+    box.addEventListener(
+        "dragover",
+        function(event) {
+
+            event.preventDefault();
+
+        }
+    );
+
+    box.addEventListener(
+        "drop",
+        function(event) {
+
+            event.preventDefault();
+
+            const target =
+                event.target;
+
+            if (
+                !target.classList.contains(
+                    "piece"
+                )
+            ) {
+                return;
+            }
+
+            if (
+                !dragged ||
+                target === dragged
+            ) {
+                return;
+            }
+
+            const pieces =
+                Array.from(
+                    box.children
+                );
+
+            const from =
+                pieces.indexOf(
+                    dragged
+                );
+
+            const to =
+                pieces.indexOf(
+                    target
+                );
+
+            if (from < to) {
+
+                box.insertBefore(
+                    dragged,
+                    target.nextSibling
+                );
+
+            } else {
+
+                box.insertBefore(
+                    dragged,
+                    target
+                );
+
+            }
+
+        }
+    );
 
 }
 
 
 function checkPuzzle() {
 
-const box =
-document.getElementById("puzzle");
+    const box =
+        document.getElementById(
+            "puzzle"
+        );
 
-const pieces =
-Array.from(box.children);
+    const pieces =
+        Array.from(
+            box.children
+        );
 
-let ok = true;
+    let correct = true;
 
-pieces.forEach((p,i)=>{
+    pieces.forEach(
+        function(piece, index) {
 
-if(
-Number(p.dataset.correct)!==i
-){
+            if (
+                Number(
+                    piece.dataset.correct
+                ) !== index
+            ) {
 
-ok=false;
+                correct = false;
 
-}
+            }
 
-});
+        }
+    );
 
+    if (correct) {
 
-if(ok){
+        addStars(15);
 
-addStars(15);
+        alert(
+            "🎉 ممتاز!\n" +
+            "أكملت تركيب الصورة!\n" +
+            "⭐ +15"
+        );
 
-alert(
-"🎉 ممتاز!\n"
-+
-"أكملت تركيب الصورة!\n"
-+
-"⭐ +15"
-);
+    } else {
 
-}else{
+        alert(
+            "😊 الصورة لم تكتمل بعد."
+        );
 
-alert(
-"😊 لم تكتمل الصورة بعد، حاول مرة أخرى."
-);
-
-}
+    }
 
 }
 
 </script>
 
 </body>
+
 </html>
 """
 
 
 # ============================================================
-# 🌐 Web Server
+# Web server
 # ============================================================
 
-async def kids_web(request):
-
-    return web.Response(
-        text=HTML,
-        content_type="text/html",
-        charset="utf-8",
-    )
-
-
 async def health(request):
-
     return web.Response(
         text="Kids Bot is running"
     )
 
 
-# ============================================================
-# 🤖 Telegram
-# ============================================================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    keyboard = [
-
-        [
-            InlineKeyboardButton(
-                "🎨 عالم الأطفال",
-                callback_data="kids"
-            )
-        ],
-
-        [
-            InlineKeyboardButton(
-                "🖍️ الرسم والتلوين",
-                callback_data="draw"
-            )
-        ],
-
-        [
-            InlineKeyboardButton(
-                "🧩 الألعاب التعليمية",
-                callback_data="games"
-            )
-        ],
-
-    ]
-
-    await update.message.reply_text(
-        "🌟 أهلاً بك في عالم الأطفال!\n\n"
-        "اختر النشاط الذي تريد:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+async def kids_page(request):
+    return web.Response(
+        text=HTML,
+        content_type="text/html",
+        charset="utf-8"
     )
 
 
-async def buttons(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    query = update.callback_query
-
-    await query.answer()
-
-
-    if query.data == "kids":
-
-        url = get_public_url()
-
-        keyboard = [[
-            InlineKeyboardButton(
-                "🎨 افتح عالم الأطفال",
-                url=url + "/kids"
-            )
-        ]]
-
-        await query.edit_message_text(
-            "🎨 عالم الأطفال\n\n"
-            "ارسم ولوّن وتعلم والعب! 🌈",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
-            )
-        )
-
-
-    elif query.data == "draw":
-
-        url = get_public_url()
-
-        await query.edit_message_text(
-            "🖍️ الرسم والتلوين متاح داخل عالم الأطفال.",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    "🎨 افتح الرسم",
-                    url=url + "/kids"
-                )
-            ]])
-        )
-
-
-    elif query.data == "games":
-
-        url = get_public_url()
-
-        await query.edit_message_text(
-            "🧩 الألعاب التعليمية:\n\n"
-            "🔤 الحروف\n"
-            "🔢 الأرقام\n"
-            "🧩 أكمل الصورة\n"
-            "🔀 إعادة تركيب الصورة",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    "🎮 ابدأ اللعب",
-                    url=url + "/kids"
-                )
-            ]])
-        )
-
-
-# ============================================================
-# 🔗 رابط Railway
-# ============================================================
-
-def get_public_url():
-
-    domain = os.environ.get(
-        "RAILWAY_PUBLIC_DOMAIN"
-    )
-
-    if domain:
-
-        if domain.startswith("http"):
-
-            return domain
-
-        return "https://" + domain
-
-
-    return "https://YOUR-RAILWAY-DOMAIN"
-
-
-# ============================================================
-# 🚀 تشغيل
-# ============================================================
-
-async def run_web():
-
+async def start_web_server():
     app = web.Application()
 
     app.router.add_get(
@@ -1291,11 +1362,10 @@ async def run_web():
 
     app.router.add_get(
         "/kids",
-        kids_web
+        kids_page
     )
 
-    runner =
-        web.AppRunner(app)
+    runner = web.AppRunner(app)
 
     await runner.setup()
 
@@ -1315,46 +1385,228 @@ async def run_web():
     await site.start()
 
     print(
-        f"Kids web server running on port {port}"
+        f"Web server running on port {port}"
     )
 
 
+# ============================================================
+# Telegram Bot
+# ============================================================
+
+async def start_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    keyboard = [
+
+        [
+            InlineKeyboardButton(
+                "🎨 عالم الأطفال",
+                callback_data="kids"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "🖍️ الرسم والتلوين",
+                callback_data="drawing"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "🔤 الحروف والأرقام",
+                callback_data="learning"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "🧩 الألعاب",
+                callback_data="games"
+            )
+        ]
+
+    ]
+
+    await update.message.reply_text(
+        "🌟 أهلاً بك في عالم الأطفال!\n\n"
+        "🎨 ارسم ولوّن\n"
+        "🔤 تعلّم الحروف\n"
+        "🔢 تعلّم الأرقام\n"
+        "🧩 حل الألعاب\n"
+        "🔀 أعد تركيب الصور\n\n"
+        "اختر نشاطاً:",
+        reply_markup=InlineKeyboardMarkup(
+            keyboard
+        )
+    )
+
+
+def public_url():
+
+    domain = os.environ.get(
+        "RAILWAY_PUBLIC_DOMAIN"
+    )
+
+    if domain:
+
+        if domain.startswith("http://") or domain.startswith("https://"):
+            return domain
+
+        return "https://" + domain
+
+    return ""
+
+
+async def button_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    query = update.callback_query
+
+    await query.answer()
+
+    url = public_url()
+
+    if query.data == "kids":
+
+        if not url:
+
+            await query.edit_message_text(
+                "🎨 عالم الأطفال جاهز، "
+                "لكن يجب إضافة Public Domain في Railway."
+            )
+
+            return
+
+        keyboard = [[
+            InlineKeyboardButton(
+                "🎨 افتح عالم الأطفال",
+                url=url + "/kids"
+            )
+        ]]
+
+        await query.edit_message_text(
+            "🌈 مرحباً بك في عالم الأطفال!\n\n"
+            "الرسم والتلوين والألعاب التعليمية "
+            "في انتظارك 🎨",
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
+        )
+
+    elif query.data == "drawing":
+
+        if not url:
+
+            await query.edit_message_text(
+                "افتح عالم الأطفال من Railway."
+            )
+
+            return
+
+        keyboard = [[
+            InlineKeyboardButton(
+                "🖍️ ابدأ الرسم",
+                url=url + "/kids"
+            )
+        ]]
+
+        await query.edit_message_text(
+            "🖍️ حان وقت الرسم والتلوين!",
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
+        )
+
+    elif query.data == "learning":
+
+        if not url:
+
+            await query.edit_message_text(
+                "افتح عالم الأطفال من Railway."
+            )
+
+            return
+
+        keyboard = [[
+            InlineKeyboardButton(
+                "🔤 تعلّم والعب",
+                url=url + "/kids"
+            )
+        ]]
+
+        await query.edit_message_text(
+            "🔤 الحروف والأرقام تنتظرك!",
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
+        )
+
+    elif query.data == "games":
+
+        if not url:
+
+            await query.edit_message_text(
+                "افتح عالم الأطفال من Railway."
+            )
+
+            return
+
+        keyboard = [[
+            InlineKeyboardButton(
+                "🧩 ابدأ الألعاب",
+                url=url + "/kids"
+            )
+        ]]
+
+        await query.edit_message_text(
+            "🧩 أكمل الصورة وأعد تركيبها!",
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
+        )
+
+
+# ============================================================
+# تشغيل البرنامج
+# ============================================================
+
 async def main():
 
-    await run_web()
+    await start_web_server()
 
-    application =
-        Application.builder().token(
-            BOT_TOKEN
-        ).build()
-
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .build()
+    )
 
     application.add_handler(
         CommandHandler(
             "start",
-            start
+            start_command
         )
     )
-
 
     application.add_handler(
         CallbackQueryHandler(
-            buttons
+            button_handler
         )
     )
-
 
     print(
         "🎨 Kids Telegram Bot started"
     )
-
 
     await application.initialize()
 
     await application.start()
 
     await application.updater.start_polling()
-
 
     try:
 
@@ -1370,7 +1622,5 @@ async def main():
 
 
 if __name__ == "__main__":
-
-    import asyncio
 
     asyncio.run(main())
